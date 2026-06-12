@@ -1,5 +1,6 @@
 #include <dv-processing/io/camera/dvxplorer_m.hpp>
 #include "rclcpp/rclcpp.hpp"
+#include "dv_processing_driver/msg/event_array.hpp"
 
 namespace dv_capture_node {
 class CaptureNode : public rclcpp::Node {
@@ -24,6 +25,7 @@ class CaptureNode : public rclcpp::Node {
         dv::io::camera::CameraPtr capture;
 
         // publisher declaration
+        rclcpp::Publisher<dv_processing_driver::msg::EventArray>::SharedPtr mEventPub;
 
         // thread related
 };
