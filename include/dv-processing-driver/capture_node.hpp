@@ -1,5 +1,6 @@
 #include <dv-processing/io/camera/dvxplorer_m.hpp>
 #include <dv-processing/camera/calibrations/camera_calibration.hpp>
+#include <dv-processing/io/camera/discovery.hpp>
 
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
@@ -32,7 +33,7 @@ class CaptureNode : public rclcpp::Node {
 
     private:
         // declare the camera device
-        dv::io::camera::DVXplorerM mCamera{};
+        dv::io::camera::CameraPtr mCamera = dv::io::camera::open();
 
         // publisher declaration
         rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr mCamInfoPub;

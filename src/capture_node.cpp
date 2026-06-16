@@ -1,7 +1,7 @@
 #include "../include/dv-processing-driver/capture_node.hpp"
 
 #include <optional>
-#include <logging.hpp>
+#include <opencv4/opencv2/core/types.hpp>
 
 namespace dv_capture_node {
     CaptureNode::CaptureNode() : Node("dv_capture_node") {
@@ -15,12 +15,11 @@ namespace dv_capture_node {
         if (!calibrationPath.empty()) {
 
         } else {
-            RCLCPP_DEBUG_STREAM(this->get_logger(), "[" << mCamera.getCameraName() << "] No calibration found, assuming ideal pinhole (no distortion).");
-            uint8_t height = mCamera.DVS_RESOLUTION_Y;
-            uint8_t width = mCamera.DVS_RESOLUTION_X;
-            const auto width = static_cast<float>(width);
+            RCLCPP_DEBUG_STREAM(this->get_logger(), "[" << mCamera->getCameraName() << "] No calibration found, assuming ideal pinhole (no distortion).");
+            std::optional<cv::Size> resolution = mCamera->getEventResolution();
+            const auto width = static_cast<float>(resolution->width);
             populateInfoMsg(dv::camera::CameraGeometry(
-                width, width, width * 0.5f, static_cast<float>(height) * 0.5f, ));
+                width, width, width * 0.5f, static_cast<float>(resolution->height) * 0.5f, *resolution));
             //generateActiveCalibrationFile();
         }
     }
