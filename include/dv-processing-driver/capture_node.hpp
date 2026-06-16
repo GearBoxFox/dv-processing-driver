@@ -1,4 +1,8 @@
 #include <dv-processing/io/camera/dvxplorer_m.hpp>
+#include <sensor_msgs/msg/imu.hpp>
+#include <sensor_msgs/msg/camera_info.hpp>
+#include <sensor_msgs/msg/image.hpp>
+
 #include "rclcpp/rclcpp.hpp"
 #include "dv_processing_driver/msg/event_array.hpp"
 
@@ -11,13 +15,13 @@ class CaptureNode : public rclcpp::Node {
         // Stop the running threads
         ~CaptureNode();
 
-        // Start the threads for reading data
+        // Start the capture of data
         void startCapture();
 
-        // Stop the running threads
+        // Stop the capture of data
         void stop();
 
-        // Returns whether the read threads are still running
+        // Returns whether the capture of data is still running
         bool isRunning() const;
 
     private:
@@ -25,8 +29,9 @@ class CaptureNode : public rclcpp::Node {
         dv::io::camera::CameraPtr capture;
 
         // publisher declaration
+        rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr mCamInfoPub;
         rclcpp::Publisher<dv_processing_driver::msg::EventArray>::SharedPtr mEventPub;
-
-        // thread related
+        rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr mImuPub;
+        rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr mAccumFramePub;
 };
 } // namespace dv_capture_node
