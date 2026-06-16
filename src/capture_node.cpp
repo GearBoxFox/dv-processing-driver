@@ -1,10 +1,13 @@
 #include "../include/dv-processing-driver/capture_node.hpp"
 
 #include <optional>
+#include<filesystem>
 #include <opencv4/opencv2/core/types.hpp>
 
 namespace dv_capture_node {
     CaptureNode::CaptureNode() : Node("dv_capture_node") {
+        declareParameters();
+
         // create all publishers for data
         mEventPub = this->create_publisher<dv_processing_driver::msg::EventArray>("events", 10);
         mImuPub = this->create_publisher<sensor_msgs::msg::Imu>("imu", 10);
@@ -13,13 +16,23 @@ namespace dv_capture_node {
         // Configure the camera and calibration
         auto calibrationPath = this->get_parameter("calibration_path").as_string();
         if (!calibrationPath.empty()) {
+            ROS_INFO_STREAM("Loading user supplied calibration at path [" << calibrationPath << "]");
+            if (!fs::exists(calibrationPath)) {
+                throw dv::exceptions::InvalidArgument<std::string>(
+                    "User supplied calibration file does not exist!", calibrationPath);
+            }
+            ROS_INFO_STREAM(fmt::format("Loading calibration data from {0}...", calibrationPath));
+            fs::copy_file(mParams.cameraCalibrationFilePath, calibrationPath, fs::copy_options::overwrite_existing);
+        }
+
+        if (fs::exists(calibrationPath)) {
 
         } else {
-            RCLCPP_DEBUG_STREAM(this->get_logger(), "[" << mCamera->getCameraName() << "] No calibration found, assuming ideal pinhole (no distortion).");
-            std::optional<cv::Size> resolution = mCamera->getEventResolution();
-            const auto width = static_cast<float>(resolution->width);
+            RCLCPP_WARN_STREAM(this->get_logger(), "[" << mCamera->getCameraName() << "] No calibration found, assuming ideal pinhole (no distortion).");
+            cv::Size resolution = mCamera->getEventResolution().value();
+            const auto width = static_cast<float>(resolution.width);
             populateInfoMsg(dv::camera::CameraGeometry(
-                width, width, width * 0.5f, static_cast<float>(resolution->height) * 0.5f, *resolution));
+                width, width, width * 0.5f, static_cast<float>(resolution.height) * 0.5f, resolution));
             //generateActiveCalibrationFile();
         }
     }
@@ -65,6 +78,118 @@ namespace dv_capture_node {
         mCameraInfoMsg.k = {fx, 0, cx, 0, fy, cy, 0, 0, 1};
         mCameraInfoMsg.r = {1.0, 0, 0, 0, 1.0, 0, 0, 0, 1.0};
         mCameraInfoMsg.p = {fx, 0, cx, 0, 0, fy, cy, 0, 0, 0, 1.0, 0};
+    }
+
+    fs::path CaptureNode::getCameraCalibrationDirectory(const bool createDirectories) const {
+        const fs::path directory
+            = fmt::format("{0}/.dv_camera/camera_calibration/{1}", std::getenv("HOME"), mCamera->getCameraName());
+        if (createDirectories && !fs::exists(directory)) {
+            fs::create_directories(directory);
+        }
+        return directory;
+    }
+
+    fs::path CaptureNode::getActiveCalibrationPath() const {
+        return getCameraCalibrationDirectory() / "active_calibration.json";
+    }
+
+    void CaptureNode::generateActiveCalibrationFile() {
+        ROS_INFO("Generating active calibration file...");
+        updateCalibrationSet();
+        mCalibration.writeToFile(getActiveCalibrationPath());
+    }
+
+    fs::path CaptureNode::saveCalibration() {
+        auto date = fmt::format("{:%Y_%m_%d_%H_%M_%S}", dv::toTimePoint(dv::now()));
+        const std::string calibrationFileName
+            = fmt::format("calibration_camera_{0}_{1}.json", mCamera->getCameraName(), date);
+        const fs::path calibPath = getCameraCalibrationDirectory() / calibrationFileName;
+        updateCalibrationSet();
+        mCalibration.writeToFile(calibPath);
+
+        fs::copy_file(calibPath, getActiveCalibrationPath(), fs::copy_options::overwrite_existing);
+        return calibPath;
+    }
+
+    void CaptureNode::updateCalibrationSet() {
+        RCLCPP_INFO("Generating calibration set...");
+        const std::string cameraName = mCamera->getCameraName();
+        dv::camera::calibrations::CameraCalibration calib;
+        bool calibrationExists = false;
+        if (auto camCalibration = mCalibration.getCameraCalibrationByName(cameraName); camCalibration.has_value()) {
+            calib             = *camCalibration;
+            calibrationExists = true;
+        }
+        else {
+            calib.name = cameraName;
+        }
+        calib.resolution = cv::Size(static_cast<int>(mCameraInfoMsg.width), static_cast<int>(mCameraInfoMsg.height));
+        calib.distortion.clear();
+        calib.distortion.assign(mCameraInfoMsg.D.begin(), mCameraInfoMsg.D.end());
+        if (static_cast<std::string>(mCameraInfoMsg.distortion_model) == sensor_msgs::distortion_models::PLUMB_BOB) {
+            calib.distortionModel = dv::camera::DistortionModel::RADIAL_TANGENTIAL;
+        }
+        else if (static_cast<std::string>(mCameraInfoMsg.distortion_model) == sensor_msgs::distortion_models::EQUIDISTANT) {
+            calib.distortionModel = dv::camera::DistortionModel::EQUIDISTANT;
+        }
+        else {
+            throw dv::exceptions::InvalidArgument<dv_ros_msgs::CameraInfoMessage::_distortion_model_type>(
+                "Unknown camera model.", mCameraInfoMsg.distortion_model);
+        }
+        calib.focalLength = cv::Point2f(static_cast<float>(mCameraInfoMsg.K[0]), static_cast<float>(mCameraInfoMsg.K[4]));
+        calib.principalPoint
+            = cv::Point2f(static_cast<float>(mCameraInfoMsg.K[2]), static_cast<float>(mCameraInfoMsg.K[5]));
+
+        calib.transformationToC0 = dv::kinematics::Transformationf{};
+
+        if (calibrationExists) {
+            mCalibration.updateCameraCalibration(calib);
+        }
+        else {
+            mCalibration.addCameraCalibration(calib);
+        }
+
+        dv::camera::calibrations::IMUCalibration imuCalibration;
+        bool imuCalibrationExists = false;
+        if (auto imuCalib = mCalibration.getImuCalibrationByName(cameraName); imuCalib.has_value()) {
+            imuCalibration       = *imuCalib;
+            imuCalibrationExists = true;
+        }
+        else {
+            imuCalibration.name = cameraName;
+        }
+        bool imuHasValues = false;
+        if ((mImuToCamTransforms.has_value() && !mImuToCamTransforms->transforms.empty())) {
+            const Eigen::Matrix4f mat         = mImuToCamTransform.getTransform().transpose();
+            imuCalibration.transformationToC0 = dv::kinematics::Transformationf{0, mat};
+            imuHasValues                      = true;
+        }
+
+        if (!mAccBiases.isZero()) {
+            imuCalibration.accOffsetAvg.x = mAccBiases.x();
+            imuCalibration.accOffsetAvg.y = mAccBiases.y();
+            imuCalibration.accOffsetAvg.z = mAccBiases.z();
+            imuHasValues                  = true;
+        }
+
+        if (!mGyroBiases.isZero()) {
+            imuCalibration.omegaOffsetAvg.x = mGyroBiases.x();
+            imuCalibration.omegaOffsetAvg.y = mGyroBiases.y();
+            imuCalibration.omegaOffsetAvg.z = mGyroBiases.z();
+            imuHasValues                    = true;
+        }
+
+        if (mImuTimeOffset > 0) {
+            imuCalibration.timeOffsetMicros = mImuTimeOffset;
+            imuHasValues                    = true;
+        }
+
+        if (imuCalibrationExists) {
+            mCalibration.updateImuCalibration(imuCalibration);
+        }
+        else if (imuHasValues) {
+            mCalibration.addImuCalibration(imuCalibration);
+        }
     }
 
 
