@@ -1,6 +1,5 @@
 #include "../include/dv-processing-driver/capture_node.hpp"
 
-#include <optional>
 #include<filesystem>
 #include <opencv4/opencv2/core/types.hpp>
 #include <iostream>
@@ -191,6 +190,21 @@ namespace dv_capture_node {
         }
         else if (imuHasValues) {
             mCalibration.addImuCalibration(imuCalibration);
+        }
+    }
+
+    void CaptureNode::eventCallback() {
+        if (!mEvents.has_value()) {
+                mEvents = mCamera->getNextEventBatch();
+            }
+        while (mEvents.has_value() && !events->isEmpty()) {
+            dv::EventStore store;
+            // todo add filtering
+            store = *mEvents;
+
+            if (mEventArrayPublisher.getNumSubscribers() > 0) {
+                
+            }
         }
     }
 

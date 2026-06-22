@@ -11,6 +11,8 @@
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <tf2_msgs/msg/tf_message.hpp>
 
+#include <optional>
+
 // #include <sensor_msgs/srv/SetCameraInfo.hpp>
 
 #include <opencv4/opencv2/core.hpp>
@@ -54,7 +56,8 @@ class CaptureNode : public rclcpp::Node {
 
         sensor_msgs::msg::CameraInfo mCameraInfoMsg;
 
-        
+        std::optional<dv::EventStore> mEvents = std::nullopt;
+        cv::Size mResolution;
 
         dv::camera::CalibrationSet mCalibration;
         int64_t mImuTimeOffset      = 0;
@@ -99,6 +102,12 @@ class CaptureNode : public rclcpp::Node {
          * @return Path to the calibration
          */
         fs::path getCameraCalibrationDirectory(bool createDirectories = true) const;
+
+
+        /**
+         * Registers the callback to publish any new event data
+         */
+        void eventCallback();
 
         // services
         // bool setCameraInfo(sensor_msgs::srv::SetCameraInfo::Request &req, sensor_msgs::SetCameraInfo::Response &rsp);
