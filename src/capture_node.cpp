@@ -3,6 +3,7 @@
 #include <optional>
 #include<filesystem>
 #include <opencv4/opencv2/core/types.hpp>
+#include <iostream>
 
 namespace dv_capture_node {
     CaptureNode::CaptureNode() : Node("dv_capture_node") {
@@ -14,15 +15,16 @@ namespace dv_capture_node {
         mAccumFramePub = this->create_publisher<sensor_msgs::msg::Image>("img_accum", 10);
 
         // Configure the camera and calibration
-        auto calibrationPath = this->get_parameter("calibration_path").as_string();
-        if (!calibrationPath.empty()) {
-            ROS_INFO_STREAM("Loading user supplied calibration at path [" << calibrationPath << "]");
+        auto calibrationPath = getActiveCalibrationPath();
+        std::cout << calibrationPath << std::endl;
+        if (this->get_parameter("calibration_path").as_string() != "") {
+            RCLCPP_INFO_STREAM(this->get_logger(), "Loading user supplied calibration at path [" << calibrationPath << "]");
             if (!fs::exists(calibrationPath)) {
                 throw dv::exceptions::InvalidArgument<std::string>(
                     "User supplied calibration file does not exist!", calibrationPath);
             }
-            ROS_INFO_STREAM(fmt::format("Loading calibration data from {0}...", calibrationPath));
-            fs::copy_file(mParams.cameraCalibrationFilePath, calibrationPath, fs::copy_options::overwrite_existing);
+            RCLCPP_INFO_STREAM(this->get_logger(), fmt::format("Loading calibration data from {0}...", calibrationPath));
+            fs::copy_file(this->get_parameter("calibration_path").as_string(), calibrationPath, fs::copy_options::overwrite_existing);
         }
 
         if (fs::exists(calibrationPath)) {
@@ -33,7 +35,7 @@ namespace dv_capture_node {
             const auto width = static_cast<float>(resolution.width);
             populateInfoMsg(dv::camera::CameraGeometry(
                 width, width, width * 0.5f, static_cast<float>(resolution.height) * 0.5f, resolution));
-            //generateActiveCalibrationFile();
+            // generateActiveCalibrationFile();
         }
     }
 
@@ -94,7 +96,7 @@ namespace dv_capture_node {
     }
 
     void CaptureNode::generateActiveCalibrationFile() {
-        ROS_INFO("Generating active calibration file...");
+        RCLCPP_INFO_STREAM(this->get_logger(), "Generating active calibration file...");
         updateCalibrationSet();
         mCalibration.writeToFile(getActiveCalibrationPath());
     }
@@ -112,7 +114,7 @@ namespace dv_capture_node {
     }
 
     void CaptureNode::updateCalibrationSet() {
-        RCLCPP_INFO("Generating calibration set...");
+        RCLCPP_INFO_STREAM(this->get_logger(), "Generating calibration set...");
         const std::string cameraName = mCamera->getCameraName();
         dv::camera::calibrations::CameraCalibration calib;
         bool calibrationExists = false;
@@ -125,20 +127,20 @@ namespace dv_capture_node {
         }
         calib.resolution = cv::Size(static_cast<int>(mCameraInfoMsg.width), static_cast<int>(mCameraInfoMsg.height));
         calib.distortion.clear();
-        calib.distortion.assign(mCameraInfoMsg.D.begin(), mCameraInfoMsg.D.end());
-        if (static_cast<std::string>(mCameraInfoMsg.distortion_model) == sensor_msgs::distortion_models::PLUMB_BOB) {
+        calib.distortion.assign(mCameraInfoMsg.d.begin(), mCameraInfoMsg.d.end());
+        if (mCameraInfoMsg.distortion_model == "plumb_bob") {
             calib.distortionModel = dv::camera::DistortionModel::RADIAL_TANGENTIAL;
         }
-        else if (static_cast<std::string>(mCameraInfoMsg.distortion_model) == sensor_msgs::distortion_models::EQUIDISTANT) {
+        else if (mCameraInfoMsg.distortion_model == "equidistant") {
             calib.distortionModel = dv::camera::DistortionModel::EQUIDISTANT;
         }
         else {
-            throw dv::exceptions::InvalidArgument<dv_ros_msgs::CameraInfoMessage::_distortion_model_type>(
-                "Unknown camera model.", mCameraInfoMsg.distortion_model);
+            // throw dv::exceptions::InvalidArgument<std_msgs::msg::String>(
+                // "Unknown camera model.", mCameraInfoMsg.distortion_model);
         }
-        calib.focalLength = cv::Point2f(static_cast<float>(mCameraInfoMsg.K[0]), static_cast<float>(mCameraInfoMsg.K[4]));
+        calib.focalLength = cv::Point2f(static_cast<float>(mCameraInfoMsg.k[0]), static_cast<float>(mCameraInfoMsg.k[4]));
         calib.principalPoint
-            = cv::Point2f(static_cast<float>(mCameraInfoMsg.K[2]), static_cast<float>(mCameraInfoMsg.K[5]));
+            = cv::Point2f(static_cast<float>(mCameraInfoMsg.k[2]), static_cast<float>(mCameraInfoMsg.k[5]));
 
         calib.transformationToC0 = dv::kinematics::Transformationf{};
 
@@ -159,7 +161,7 @@ namespace dv_capture_node {
             imuCalibration.name = cameraName;
         }
         bool imuHasValues = false;
-        if ((mImuToCamTransforms.has_value() && !mImuToCamTransforms->transforms.empty())) {
+        if ((!mImuToCamTransforms.transforms.empty())) {
             const Eigen::Matrix4f mat         = mImuToCamTransform.getTransform().transpose();
             imuCalibration.transformationToC0 = dv::kinematics::Transformationf{0, mat};
             imuHasValues                      = true;

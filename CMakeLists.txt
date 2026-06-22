@@ -31,6 +31,8 @@ find_package(dv-processing REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(eigen3_cmake_module REQUIRED)
 find_package(Eigen3 REQUIRED NO_MODULE)
+find_package(geometry_msgs REQUIRED)
+find_package(tf2_msgs REQUIRED)
 # find_package(libusb REQUIRED)
 
 include_directories(${OpenCV_INCLUDE_DIRS} "${PROJECT_SOURCE_DIR}/include/**")
@@ -53,6 +55,8 @@ ament_target_dependencies(dv_processor_node
   rclcpp 
   std_msgs
   sensor_msgs
+  geometry_msgs
+  tf2_msgs
   # dv-processing
   # libusb
 )
