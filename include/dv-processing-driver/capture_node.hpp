@@ -56,6 +56,7 @@ class CaptureNode : public rclcpp::Node {
 
         sensor_msgs::msg::CameraInfo mCameraInfoMsg;
 
+        rclcpp::TimerBase::SharedPtr mEventTimer;
         std::optional<dv::EventStore> mEvents = std::nullopt;
         cv::Size mResolution;
 
@@ -113,5 +114,58 @@ class CaptureNode : public rclcpp::Node {
         // bool setCameraInfo(sensor_msgs::srv::SetCameraInfo::Request &req, sensor_msgs::SetCameraInfo::Response &rsp);
         // bool setImuInfo(dv_ros_capture::SetImuInfo::Request &req, dv_ros_capture::SetImuInfo::Response &rsp);
 	    // bool setImuBiases(dv_ros_capture::SetImuBiases::Request &req, dv_ros_capture::SetImuBiases::Response &rsp);
+
+        // Datatype converters
+        /**
+         * Converts UNIX microsecond timestamp into ros::Time format.
+         * @param timestamp	DV format UNIX microsecond timestamp
+         * @return ROS timestamp
+         */
+        [[nodiscard]] inline builtin_interfaces::msg::Time toRosTime(const int64_t timestamp) {
+            builtin_interfaces::msg::Time ts;
+            ts.sec = static_cast<uint32_t>(timestamp / 1'000'000); 
+            ts.nanosec = static_cast<uint32_t>((timestamp % 1'000'000) * 1'000);
+            return ts;
+        }
+
+        /**
+         * Convert ros::Time time into UNIX microsecond timestamp
+         * @param timestamp ROS timestamp
+         * @return DV format UNIX microsecond timestamp
+         */
+        [[nodiscard]] inline int64_t toDvTime(const builtin_interfaces::msg::Time &timestamp) {
+            return (static_cast<int64_t>(timestamp.sec) * 1'000'000) + (timestamp.nanosec / 1'000);
+        }
+
+        dv_processing_driver::msg::EventArray toRosEventsMessage(const dv::EventStore &events, const cv::Size &resolution) {
+        dv_processing_driver::msg::EventArray msg;
+        builtin_interfaces::msg::Time time = toRosTime(events.getLowestTime());
+
+        int64_t secInMicro = static_cast<int64_t>(time.sec) * 1'000'000;
+        builtin_interfaces::msg::Time ts = builtin_interfaces::msg::Time();
+        ts.nanosec = static_cast<double>(events.getHighestTime()) * 1e-6;
+        msg.header.stamp = ts;
+        msg.events.reserve(events.size());
+        for (const auto &event : events) {
+            int64_t time_diff = event.timestamp() - secInMicro;
+            if (time_diff < 1'000'000) {
+                // We are in the same second, we only need to update the nano-second part
+                time.nanosec = time_diff * 1'000;
+            }
+            else {
+                time       = toRosTime(event.timestamp());
+                secInMicro = static_cast<int64_t>(time.sec) * 1'000'000;
+            }
+            auto &e    = msg.events.emplace_back();
+            e.x        = event.x();
+            e.y        = event.y();
+            e.polarity = event.polarity();
+            e.ts       = time;
+        }
+
+        msg.width  = resolution.width;
+        msg.height = resolution.height;
+        return msg;
+    }
 };
 } // namespace dv_capture_node

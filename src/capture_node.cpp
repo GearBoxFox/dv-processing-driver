@@ -3,6 +3,7 @@
 #include<filesystem>
 #include <opencv4/opencv2/core/types.hpp>
 #include <iostream>
+#include <chrono>
 
 namespace dv_capture_node {
     CaptureNode::CaptureNode() : Node("dv_capture_node") {
@@ -36,6 +37,12 @@ namespace dv_capture_node {
                 width, width, width * 0.5f, static_cast<float>(resolution.height) * 0.5f, resolution));
             // generateActiveCalibrationFile();
         }
+
+        // setup callback publishers on a timer
+        RCLCPP_INFO_STREAM(this->get_logger(), "Creating callback timer...");
+        mEventTimer = this->create_wall_timer(
+            std::chrono::milliseconds(500), std::bind(&CaptureNode::eventCallback, this)
+        );
     }
 
     void CaptureNode::populateInfoMsg(const dv::camera::CameraGeometry &cameraGeometry) {
@@ -194,18 +201,28 @@ namespace dv_capture_node {
     }
 
     void CaptureNode::eventCallback() {
+        RCLCPP_INFO_STREAM(this->get_logger(), "Starting to publish events.");
+        int i = 0;
+
         if (!mEvents.has_value()) {
                 mEvents = mCamera->getNextEventBatch();
+                RCLCPP_INFO_STREAM(this->get_logger(), "No events! Getting next batch");
             }
-        while (mEvents.has_value() && !events->isEmpty()) {
+        while (mEvents.has_value() && !mEvents->isEmpty()) {
             dv::EventStore store;
             // todo add filtering
             store = *mEvents;
 
-            if (mEventArrayPublisher.getNumSubscribers() > 0) {
-                
+            if (mEventPub->get_subscription_count() > 0) {
+                auto msg = this->toRosEventsMessage(store, mResolution);
+                mEventPub->publish(msg);
             }
+
+            i++;
+            mEvents = mCamera->getNextEventBatch();
         }
+
+        RCLCPP_INFO_STREAM(this->get_logger(), "Finished publishing " << i << " events!");
     }
 
 
