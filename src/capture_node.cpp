@@ -14,37 +14,110 @@ namespace dv_capture_node {
         mImuPub = this->create_publisher<sensor_msgs::msg::Imu>("imu", 10);
         mAccumFramePub = this->create_publisher<sensor_msgs::msg::Image>("img_accum", 10);
 
+        // create the accumulator for the frames
+        mAccumulator = dv::Accumulator(mCamera->getEventResolution().value());
+
         // Configure the camera and calibration
-        auto calibrationPath = getActiveCalibrationPath();
-        std::cout << calibrationPath << std::endl;
+        fs::path calibrationPath = getActiveCalibrationPath();
         if (this->get_parameter("calibration_path").as_string() != "") {
-            RCLCPP_INFO_STREAM(this->get_logger(), "Loading user supplied calibration at path [" << calibrationPath << "]");
-            if (!fs::exists(calibrationPath)) {
+            RCLCPP_INFO_STREAM(this->get_logger(), "Loading user supplied calibration at path [" << this->get_parameter("calibration_path").as_string() << "]");
+            if (!fs::exists(this->get_parameter("calibration_path").as_string())) {
                 throw dv::exceptions::InvalidArgument<std::string>(
-                    "User supplied calibration file does not exist!", calibrationPath);
+                    "User supplied calibration file does not exist!", this->get_parameter("calibration_path").as_string());
             }
-            RCLCPP_INFO_STREAM(this->get_logger(), fmt::format("Loading calibration data from {0}...", calibrationPath));
+            RCLCPP_INFO_STREAM(this->get_logger(), fmt::format("Loading calibration data from {0}...", this->get_parameter("calibration_path").as_string()));
             fs::copy_file(this->get_parameter("calibration_path").as_string(), calibrationPath, fs::copy_options::overwrite_existing);
         }
 
         if (fs::exists(calibrationPath)) {
+            RCLCPP_INFO_STREAM(this->get_logger(), "Loading calibration file [" << calibrationPath << "]");
+            mCalibration                 = dv::camera::CalibrationSet::LoadFromFile(calibrationPath);
+            const std::string cameraName = mCamera->getCameraName();
+            auto cameraCalibration       = mCalibration.getCameraCalibrationByName(cameraName);
+            if (const auto &imuCalib = mCalibration.getImuCalibrationByName(cameraName); imuCalib.has_value()) {
+                mTransformPublisher = this->create_publisher<tf2_msgs::msg::TFMessage>("/tf", 100);
+                mImuTimeOffset      = imuCalib->timeOffsetMicros;
 
-        } else {
-            RCLCPP_WARN_STREAM(this->get_logger(), "[" << mCamera->getCameraName() << "] No calibration found, assuming ideal pinhole (no distortion).");
-            cv::Size resolution = mCamera->getEventResolution().value();
-            const auto width = static_cast<float>(resolution.width);
-            populateInfoMsg(dv::camera::CameraGeometry(
-                width, width, width * 0.5f, static_cast<float>(resolution.height) * 0.5f, resolution));
-            // generateActiveCalibrationFile();
+                geometry_msgs::msg::TransformStamped msg;
+                msg.header.frame_id = this->get_parameter("imu_frame_name").as_string();
+                msg.child_frame_id  = this->get_parameter("camera_frame_name").as_string();
+
+                mImuToCamTransform = dv::kinematics::Transformationf(0, imuCalib->transformationToC0.getTransform());
+
+                mAccBiases.x() = imuCalib->accOffsetAvg.x;
+                mAccBiases.y() = imuCalib->accOffsetAvg.y;
+                mAccBiases.z() = imuCalib->accOffsetAvg.z;
+
+                mGyroBiases.x() = imuCalib->omegaOffsetAvg.x;
+                mGyroBiases.y() = imuCalib->omegaOffsetAvg.y;
+                mGyroBiases.z() = imuCalib->omegaOffsetAvg.z;
+
+                const auto translation      = mImuToCamTransform.getTranslation<Eigen::Vector3d>();
+                msg.transform.translation.x = translation.x();
+                msg.transform.translation.y = translation.y();
+                msg.transform.translation.z = translation.z();
+
+                const auto rotation      = mImuToCamTransform.getQuaternion();
+                msg.transform.rotation.x = rotation.x();
+                msg.transform.rotation.y = rotation.y();
+                msg.transform.rotation.z = rotation.z();
+                msg.transform.rotation.w = rotation.w();
+
+                mImuToCamTransforms = tf2_msgs::msg::TFMessage();
+                mImuToCamTransforms.transforms.push_back(msg);
+            }
+            if (cameraCalibration.has_value()) {
+                populateInfoMsg(cameraCalibration->getCameraGeometry());
+            }
+            else {
+                RCLCPP_ERROR_STREAM(this->get_logger(), "Calibration in [" << calibrationPath << "] does not contain calibration for camera ["
+                                                    << cameraName << "]");
+                std::vector<std::string> names;
+                for (const auto &calib : mCalibration.getCameraCalibrations()) {
+                    names.push_back(calib.second.name);
+                }
+                const std::string nameString = fmt::format("{}", fmt::join(names, "; "));
+                RCLCPP_ERROR_STREAM(this->get_logger(), "The file only contains calibrations for these cameras: [" << nameString << "]");
+                throw std::runtime_error("Calibration is not available!");
+            }
+        }
+        else {
+            RCLCPP_WARN_STREAM(this->get_logger(),
+                "[" << mCamera->getCameraName() << "] No calibration was found, assuming ideal pinhole (no distortion).");
+            std::optional<cv::Size> resolution;
+            if (mCamera->isFrameStreamAvailable()) {
+                resolution = mCamera->getFrameResolution();
+            }
+            else if (mCamera->isEventStreamAvailable()) {
+                resolution = mCamera->getEventResolution();
+            }
+            if (resolution.has_value()) {
+                const auto width = static_cast<float>(resolution->width);
+                populateInfoMsg(dv::camera::CameraGeometry(
+                    width, width, width * 0.5f, static_cast<float>(resolution->height) * 0.5f, *resolution));
+                generateActiveCalibrationFile();
+            }
+            else {
+                throw std::runtime_error("Sensor resolution not available.");
+            }
         }
 
+
         // setup callback publishers on a timer
-        RCLCPP_INFO_STREAM(this->get_logger(), "Creating callback timer...");
+        RCLCPP_INFO_STREAM(this->get_logger(), "Creating event callback timer...");
         mEventTimer = this->create_wall_timer(
             std::chrono::milliseconds(500), std::bind(&CaptureNode::eventCallback, this)
         );
+
+        if (this->get_parameter("accumulate_frames").as_bool()) {
+            RCLCPP_INFO_STREAM(this->get_logger(), "Creating frame callback timer...");
+            mFrameTimer = this->create_wall_timer(
+                std::chrono::milliseconds(500), std::bind(&CaptureNode::frameCallback, this)
+            );
+        }
     }
 
+    // Populates the camera info message with the given camera geometry
     void CaptureNode::populateInfoMsg(const dv::camera::CameraGeometry &cameraGeometry) {
         mCameraInfoMsg.width  = cameraGeometry.getResolution().width;
         mCameraInfoMsg.height = cameraGeometry.getResolution().height;
@@ -88,6 +161,7 @@ namespace dv_capture_node {
         mCameraInfoMsg.p = {fx, 0, cx, 0, 0, fy, cy, 0, 0, 0, 1.0, 0};
     }
 
+    // Returns the directory where camera calibration files are stored
     fs::path CaptureNode::getCameraCalibrationDirectory(const bool createDirectories) const {
         const fs::path directory
             = fmt::format("{0}/.dv_camera/camera_calibration/{1}", std::getenv("HOME"), mCamera->getCameraName());
@@ -97,16 +171,19 @@ namespace dv_capture_node {
         return directory;
     }
 
+    // Returns the path to the active calibration file for the currently opened camera
     fs::path CaptureNode::getActiveCalibrationPath() const {
         return getCameraCalibrationDirectory() / "active_calibration.json";
     }
 
+    // Generates the active calibration file for the currently opened camera
     void CaptureNode::generateActiveCalibrationFile() {
         RCLCPP_INFO_STREAM(this->get_logger(), "Generating active calibration file...");
         updateCalibrationSet();
         mCalibration.writeToFile(getActiveCalibrationPath());
     }
 
+    //  Saves the current calibration set to a new file and returns the path to the new file
     fs::path CaptureNode::saveCalibration() {
         auto date = fmt::format("{:%Y_%m_%d_%H_%M_%S}", dv::toTimePoint(dv::now()));
         const std::string calibrationFileName
@@ -119,6 +196,7 @@ namespace dv_capture_node {
         return calibPath;
     }
 
+    // Updates the calibration set with the current camera info and IMU info
     void CaptureNode::updateCalibrationSet() {
         RCLCPP_INFO_STREAM(this->get_logger(), "Generating calibration set...");
         const std::string cameraName = mCamera->getCameraName();
@@ -200,13 +278,14 @@ namespace dv_capture_node {
         }
     }
 
+    // Handles the event callback logic
     void CaptureNode::eventCallback() {
-        RCLCPP_INFO_STREAM(this->get_logger(), "Starting to publish events.");
+        // RCLCPP_INFO_STREAM(this->get_logger(), "Starting to publish events.");
         int i = 0;
 
         if (!mEvents.has_value()) {
                 mEvents = mCamera->getNextEventBatch();
-                RCLCPP_INFO_STREAM(this->get_logger(), "No events! Getting next batch");
+                // RCLCPP_INFO_STREAM(this->get_logger(), "No events! Getting next batch");
             }
         while (mEvents.has_value() && !mEvents->isEmpty()) {
             dv::EventStore store;
@@ -218,16 +297,31 @@ namespace dv_capture_node {
                 mEventPub->publish(msg);
             }
 
+            if (this->get_parameter("accumulate_frames").as_bool()) {
+                mAccumulator.accumulate(store);
+            }
+
             i++;
             mEvents = mCamera->getNextEventBatch();
         }
 
-        RCLCPP_INFO_STREAM(this->get_logger(), "Finished publishing " << i << " events!");
+        // RCLCPP_INFO_STREAM(this->get_logger(), "Finished publishing " << i << " events!");
     }
 
+    void CaptureNode::frameCallback() {
+        auto frame = mAccumulator.generateFrame();
+        auto msg   = this->toRosImageMessage(frame.image);
+        mAccumFramePub->publish(msg);
+    }
 
+    // Declares the parameters for the capture node
     void CaptureNode::declareParameters() {
         this->declare_parameter("calibration_path", "");
+        this->declare_parameter("accumulate_frames", true);
+        this->declare_parameter("imu_frame_name", "imu_link");
+        this->declare_parameter("camera_frame_name", "camera_link");
+        this->declare_parameter("camera_calibration_path", "");
+        this->declare_parameter("imu_calibration_path", "");
     }
 
     

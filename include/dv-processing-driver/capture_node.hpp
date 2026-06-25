@@ -8,6 +8,7 @@
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <sensor_msgs/msg/image.hpp>
+#include <sensor_msgs/image_encodings.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <tf2_msgs/msg/tf_message.hpp>
 
@@ -23,6 +24,7 @@
 
 #include "rclcpp/rclcpp.hpp"
 #include "dv_processing_driver/msg/event_array.hpp"
+#include "calibration_reader.hpp"
 
 namespace fs = std::filesystem;
 
@@ -53,13 +55,20 @@ class CaptureNode : public rclcpp::Node {
         rclcpp::Publisher<dv_processing_driver::msg::EventArray>::SharedPtr mEventPub;
         rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr mImuPub;
         rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr mAccumFramePub;
+        rclcpp::Publisher<tf2_msgs::msg::TFMessage>::SharedPtr mTransformPublisher;
 
         sensor_msgs::msg::CameraInfo mCameraInfoMsg;
 
+        // Event publisher objects
         rclcpp::TimerBase::SharedPtr mEventTimer;
         std::optional<dv::EventStore> mEvents = std::nullopt;
         cv::Size mResolution;
 
+        // Frame accumulator
+        dv::Accumulator mAccumulator;
+        rclcpp::TimerBase::SharedPtr mFrameTimer;
+
+        // Camera calibration and configuration
         dv::camera::CalibrationSet mCalibration;
         int64_t mImuTimeOffset      = 0;
         Eigen::Vector3f mAccBiases  = Eigen::Vector3f::Zero();
@@ -105,10 +114,11 @@ class CaptureNode : public rclcpp::Node {
         fs::path getCameraCalibrationDirectory(bool createDirectories = true) const;
 
 
-        /**
-         * Registers the callback to publish any new event data
-         */
+        /** Handles the callback logic for publishing event data */
         void eventCallback();
+
+        /** Handles the callback logic for publishing frame data */
+        void frameCallback();
 
         // services
         // bool setCameraInfo(sensor_msgs::srv::SetCameraInfo::Request &req, sensor_msgs::SetCameraInfo::Response &rsp);
@@ -166,6 +176,67 @@ class CaptureNode : public rclcpp::Node {
         msg.width  = resolution.width;
         msg.height = resolution.height;
         return msg;
+    }
+
+    /**
+     * Convert OpenCV image into ROS image message. Supports only single channel 8-bit, three channel 8-bit BGR images,
+     * and continuous and non-continuous memory.
+     * Performs deep data copy.
+     * @param image OpenCV Image
+     * @return ROS image (sensor_msgs::Image)
+     * @throws RuntimeError If image data layout is not supported
+     */
+    [[nodiscard]] inline sensor_msgs::msg::Image toRosImageMessage(const cv::Mat &image) {
+        sensor_msgs::msg::Image msg;
+
+        msg.height = image.rows;
+        msg.width  = image.cols;
+
+        if (image.empty()) {
+            return msg;
+        }
+
+        switch (image.type()) {
+            case CV_8UC1:
+                msg.encoding = sensor_msgs::image_encodings::MONO8;
+                break;
+            case CV_8UC3:
+                msg.encoding = sensor_msgs::image_encodings::BGR8;
+                break;
+            default:
+                throw dv::exceptions::RuntimeError("Received unsupported image type");
+        }
+
+        msg.is_bigendian  = false;
+        msg.step          = msg.width * image.elemSize();
+        const size_t size = msg.step * msg.height;
+        msg.data.resize(size);
+
+        if (image.isContinuous()) {
+            memcpy((char *) (&msg.data[0]), image.data, size);
+        }
+        else {
+            auto ros_data_ptr  = (uchar *) (&msg.data[0]);
+            uchar *cv_data_ptr = image.data;
+            for (int i = 0; i < image.rows; ++i) {
+                memcpy(ros_data_ptr, cv_data_ptr, msg.step);
+                ros_data_ptr += msg.step;
+                cv_data_ptr += image.step;
+            }
+        }
+        return msg;
+    }
+
+    /**
+     * Converts dv::Frame into sensor_msgs::Image.
+     * @param frame DV Frame containing an image.
+     * @return ROS image (sensor_msgs::Image)
+     * @throws RuntimeError If image data layout is not supported
+     */
+    [[nodiscard]] inline sensor_msgs::msg::Image frameToRosImageMessage(const dv::Frame &frame) {
+        sensor_msgs::msg::Image imageMessage = toRosImageMessage(frame.image);
+        imageMessage.header.stamp = toRosTime(frame.timestamp);
+        return imageMessage;
     }
 };
 } // namespace dv_capture_node

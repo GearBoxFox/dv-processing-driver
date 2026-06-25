@@ -33,6 +33,7 @@ find_package(eigen3_cmake_module REQUIRED)
 find_package(Eigen3 REQUIRED NO_MODULE)
 find_package(geometry_msgs REQUIRED)
 find_package(tf2_msgs REQUIRED)
+find_package(pugixml REQUIRED)
 # find_package(libusb REQUIRED)
 
 include_directories(${OpenCV_INCLUDE_DIRS} "${PROJECT_SOURCE_DIR}/include/**")
