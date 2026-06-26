@@ -331,9 +331,9 @@ namespace dv_capture_node {
             if (mImuPub->get_subscription_count() > 0) {
                 for (auto &imu : *mImuData) {
                     imu.timestamp += mImuTimeOffset;
-                    /* std::cout << "IMU Data of raw value: " << imu.accelerometerX << ", " << imu.accelerometerY << ", " << imu.accelerometerZ
-                              << " and angular velocity: " << imu.gyroscopeX << ", " << imu.gyroscopeY << ", " << imu.gyroscopeZ
-                              << std::endl; */
+                    // std::cout << "IMU Data of raw value: " << imu.accelerometerX << ", " << imu.accelerometerY << ", " << imu.accelerometerZ
+                    //           << " and angular velocity: " << imu.gyroscopeX << ", " << imu.gyroscopeY << ", " << imu.gyroscopeZ
+                    //           << std::endl;
                     auto msg = toRosImuMessage(imu);
                     /* std::cout << "IMU Data of ROS value: " << msg.linear_acceleration.x << ", " << msg.linear_acceleration.y << ", " << msg.linear_acceleration.z
                               << " and angular velocity: " << msg.angular_velocity.x << ", " << msg.angular_velocity.y << ", " << msg.angular_velocity.z
