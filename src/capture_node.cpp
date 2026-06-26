@@ -109,6 +109,10 @@ namespace dv_capture_node {
             std::chrono::milliseconds(500), std::bind(&CaptureNode::eventCallback, this)
         );
 
+        mImuTimer = this->create_wall_timer(
+            std::chrono::milliseconds(500), std::bind(&CaptureNode::imuCallback, this)
+        );
+
         if (this->get_parameter("accumulate_frames").as_bool()) {
             RCLCPP_INFO_STREAM(this->get_logger(), "Creating frame callback timer...");
             mFrameTimer = this->create_wall_timer(
@@ -281,7 +285,6 @@ namespace dv_capture_node {
     // Handles the event callback logic
     void CaptureNode::eventCallback() {
         // RCLCPP_INFO_STREAM(this->get_logger(), "Starting to publish events.");
-        int i = 0;
 
         if (!mEvents.has_value()) {
                 mEvents = mCamera->getNextEventBatch();
@@ -301,7 +304,6 @@ namespace dv_capture_node {
                 mAccumulator.accumulate(store);
             }
 
-            i++;
             mEvents = mCamera->getNextEventBatch();
         }
 
@@ -314,6 +316,49 @@ namespace dv_capture_node {
         mAccumFramePub->publish(msg);
     }
 
+    void CaptureNode::imuCallback(){
+        if (!mImuData.has_value()) {
+            mImuData = mCamera->getNextImuBatch();
+        }
+
+        while (mImuData.has_value() && !mImuData->empty()) {
+            if (mImuPub->get_subscription_count() > 0) {
+                for (auto &imu : *mImuData) {
+                    auto msg = toRosImuMessage(imu);
+                    mImuPub->publish(msg);
+                }
+            }
+        }
+    }
+
+    sensor_msgs::msg::Imu CaptureNode::transformImuFrame(sensor_msgs::msg::Imu &&imu) {
+        if (this->get_parameter("unbiasedImuData").as_bool()) {
+            imu.linear_acceleration.x -= mAccBiases.x();
+            imu.linear_acceleration.y -= mAccBiases.y();
+            imu.linear_acceleration.z -= mAccBiases.z();
+
+            imu.angular_velocity.x -= mGyroBiases.x();
+            imu.angular_velocity.y -= mGyroBiases.y();
+            imu.angular_velocity.z -= mGyroBiases.z();
+        }
+        if (this->get_parameter("transformImuToCameraFrame").as_bool()) {
+            const Eigen::Vector3<double> resW
+                = mImuToCamTransform.rotatePoint<Eigen::Vector3<double>>(imu.angular_velocity);
+            imu.angular_velocity.x = resW.x();
+            imu.angular_velocity.y = resW.y();
+            imu.angular_velocity.z = resW.z();
+
+            const Eigen::Vector3<double> resV
+                = mImuToCamTransform.rotatePoint<Eigen::Vector3<double>>(imu.linear_acceleration);
+            imu.linear_acceleration.x = resV.x();
+            imu.linear_acceleration.y = resV.y();
+            imu.linear_acceleration.z = resV.z();
+        }
+        return imu;
+    } 
+
+
+
     // Declares the parameters for the capture node
     void CaptureNode::declareParameters() {
         this->declare_parameter("calibration_path", "");
@@ -322,6 +367,8 @@ namespace dv_capture_node {
         this->declare_parameter("camera_frame_name", "camera_link");
         this->declare_parameter("camera_calibration_path", "");
         this->declare_parameter("imu_calibration_path", "");
+        this->declare_parameter("transformImuToCameraFrame", true);
+        this->declare_parameter("unbiasedImuData", true);
     }
 
     

@@ -24,7 +24,6 @@
 
 #include "rclcpp/rclcpp.hpp"
 #include "dv_processing_driver/msg/event_array.hpp"
-#include "calibration_reader.hpp"
 
 namespace fs = std::filesystem;
 
@@ -67,6 +66,9 @@ class CaptureNode : public rclcpp::Node {
         // Frame accumulator
         dv::Accumulator mAccumulator;
         rclcpp::TimerBase::SharedPtr mFrameTimer;
+
+        rclcpp::TimerBase::SharedPtr mImuTimer;
+        std::optional<std::vector<dv::IMU>> mImuData = std::nullopt;
 
         // Camera calibration and configuration
         dv::camera::CalibrationSet mCalibration;
@@ -113,12 +115,15 @@ class CaptureNode : public rclcpp::Node {
          */
         fs::path getCameraCalibrationDirectory(bool createDirectories = true) const;
 
+        sensor_msgs::msg::Imu transformImuFrame(sensor_msgs::msg::Imu &&imu);
 
         /** Handles the callback logic for publishing event data */
         void eventCallback();
 
         /** Handles the callback logic for publishing frame data */
         void frameCallback();
+
+        void imuCallback();
 
         // services
         // bool setCameraInfo(sensor_msgs::srv::SetCameraInfo::Request &req, sensor_msgs::SetCameraInfo::Response &rsp);
@@ -237,6 +242,28 @@ class CaptureNode : public rclcpp::Node {
         sensor_msgs::msg::Image imageMessage = toRosImageMessage(frame.image);
         imageMessage.header.stamp = toRosTime(frame.timestamp);
         return imageMessage;
+    }
+
+    /**
+     * Convert dv::IMU into sensor_msgs::Imu
+     * @param imu DV IMU measurement
+     * @return ROS Imu message
+     */
+    [[nodiscard]] inline sensor_msgs::msg::Imu toRosImuMessage(const dv::IMU &imu) {
+        sensor_msgs::msg::Imu imuMessage;
+        imuMessage.header.stamp = toRosTime(imu.timestamp);
+
+        constexpr float deg2rad = std::numbers::pi_v<float> / 180.0f;
+        constexpr float earthG  = 9.81007f;
+
+        imuMessage.angular_velocity.x    = imu.gyroscopeX * deg2rad;
+        imuMessage.angular_velocity.y    = imu.gyroscopeY * deg2rad;
+        imuMessage.angular_velocity.z    = imu.gyroscopeZ * deg2rad;
+        imuMessage.linear_acceleration.x = imu.accelerometerX * earthG;
+        imuMessage.linear_acceleration.y = imu.accelerometerY * earthG;
+        imuMessage.linear_acceleration.z = imu.accelerometerZ * earthG;
+
+        return imuMessage;
     }
 };
 } // namespace dv_capture_node
