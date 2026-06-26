@@ -380,14 +380,20 @@ namespace dv_capture_node {
 
     // Declares the parameters for the capture node
     void CaptureNode::declareParameters() {
+        // startup parameters
         this->declare_parameter("calibration_path", "");
         this->declare_parameter("accumulate_frames", true);
         this->declare_parameter("imu_frame_name", "imu_link");
         this->declare_parameter("camera_frame_name", "camera_link");
-        this->declare_parameter("camera_calibration_path", "");
-        this->declare_parameter("imu_calibration_path", "");
+
+        // Imu parameters
         this->declare_parameter("transformImuToCameraFrame", false);
         this->declare_parameter("unbiasedImuData", false);
+
+        // Accumulator parameters
+        this->declare_parameter("accumulator_decay_param", 1.0e+6f);
+        this->declare_parameter("accumulator_event_contribution", 0.15f);
+        this->declare_parameter("accumulator_decay_function", "EXPONENTIAL");
     }
 
     
