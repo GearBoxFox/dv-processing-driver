@@ -5,8 +5,9 @@ def generate_launch_description():
     return LaunchDescription([
         Node(
             package='dv_processing_driver',
-            executable='capture_node',
+            executable='dv_processor_node',
             name='capture_node',
+            namespace='dvxm',
             output='screen',
             parameters=[
                 {'calibration_path': ''},

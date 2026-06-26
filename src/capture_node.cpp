@@ -17,6 +17,10 @@ namespace dv_capture_node {
         // create the accumulator for the frames
         mAccumulator = dv::Accumulator(mCamera->getEventResolution().value());
 
+        mAccumulator.setDecayFunction(dv::Accumulator::Decay::LINEAR);
+        mAccumulator.setDecayParam(1.0e-8);
+        mAccumulator.setEventContribution(0.35f);
+
         // Configure the camera and calibration
         fs::path calibrationPath = getActiveCalibrationPath();
         if (this->get_parameter("calibration_path").as_string() != "") {
@@ -316,7 +320,7 @@ namespace dv_capture_node {
 
     void CaptureNode::frameCallback() {
         auto frame = mAccumulator.generateFrame();
-        auto msg   = this->toRosImageMessage(frame.image);
+        auto msg   = this->frameToRosImageMessage(frame);
         mAccumFramePub->publish(msg);
     }
 
