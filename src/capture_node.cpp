@@ -307,6 +307,10 @@ namespace dv_capture_node {
             mEvents = mCamera->getNextEventBatch();
         }
 
+        if (mEvents.has_value() && mEvents->isEmpty()) {
+            mEvents = std::nullopt;
+        }
+
         // RCLCPP_INFO_STREAM(this->get_logger(), "Finished publishing " << i << " events!");
     }
 
@@ -321,13 +325,28 @@ namespace dv_capture_node {
             mImuData = mCamera->getNextImuBatch();
         }
 
+        // std::cout << "IMU callback called, publishing " << (mImuData.has_value() ? mImuData->size() : 0) << " IMU messages." << std::endl;
+
         while (mImuData.has_value() && !mImuData->empty()) {
             if (mImuPub->get_subscription_count() > 0) {
                 for (auto &imu : *mImuData) {
+                    imu.timestamp += mImuTimeOffset;
+                    /* std::cout << "IMU Data of raw value: " << imu.accelerometerX << ", " << imu.accelerometerY << ", " << imu.accelerometerZ
+                              << " and angular velocity: " << imu.gyroscopeX << ", " << imu.gyroscopeY << ", " << imu.gyroscopeZ
+                              << std::endl; */
                     auto msg = toRosImuMessage(imu);
+                    /* std::cout << "IMU Data of ROS value: " << msg.linear_acceleration.x << ", " << msg.linear_acceleration.y << ", " << msg.linear_acceleration.z
+                              << " and angular velocity: " << msg.angular_velocity.x << ", " << msg.angular_velocity.y << ", " << msg.angular_velocity.z
+                              << std::endl; */
                     mImuPub->publish(msg);
                 }
             }
+
+            mImuData = mCamera->getNextImuBatch();
+        }
+
+        if (mImuData.has_value() && mImuData->empty()) {
+            mImuData = std::nullopt;
         }
     }
 
@@ -367,8 +386,8 @@ namespace dv_capture_node {
         this->declare_parameter("camera_frame_name", "camera_link");
         this->declare_parameter("camera_calibration_path", "");
         this->declare_parameter("imu_calibration_path", "");
-        this->declare_parameter("transformImuToCameraFrame", true);
-        this->declare_parameter("unbiasedImuData", true);
+        this->declare_parameter("transformImuToCameraFrame", false);
+        this->declare_parameter("unbiasedImuData", false);
     }
 
     
