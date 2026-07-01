@@ -134,17 +134,9 @@ Install (example using pip):
 pip install rosbags
 ```
 
-Common usage examples:
-
-# Using the `rosbags` CLI (`rosbags convert`):
+# Using `rosbags-convert`:
 ```bash
-# convert a ROS 2 bag directory into a ROS 1 bag file
-rosbags convert <ros2_bag_directory> --output-format ros1 --output kalibr_ros1.bag
-```
-
-# If you have a `rosbags-convert` binary available:
-```bash
-rosbags-convert <input_ros2_bag> <output_ros1_bag> --input-format ros2 --output-format ros1
+rosbags-convert --src <input_ros2_bag> --dst <output_ros1_bag>
 ```
 
 After conversion, verify the resulting bag with ROS 1 tools:
@@ -172,6 +164,4 @@ Notes:
 - Executable target: `dv_processor_node` (installed to `lib/dv_processing_driver`)
 - Launch file: `launch/capture.launch.py`
 - Message definitions are in `msg/Event.msg` and `msg/EventArray.msg`.
-
-If you want, I can also add a small helper script to extract images and imu data from a recorded bag for Kalibr.
 
