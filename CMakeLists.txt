@@ -36,7 +36,7 @@ find_package(tf2_msgs REQUIRED)
 find_package(pugixml REQUIRED)
 # find_package(libusb REQUIRED)
 
-include_directories(${OpenCV_INCLUDE_DIRS} "${PROJECT_SOURCE_DIR}/include/**")
+include_directories(${OpenCV_INCLUDE_DIRS} "${PROJECT_SOURCE_DIR}/include")
 #include_directories("$ENV{EIGEN3_INCLUDE_DIR}")
 
 
@@ -48,9 +48,10 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "std_msgs"
 )
 
-file(GLOB SOURCES "${PROJECT_SOURCE_DIR}/src/*.cpp")
-
-add_executable(dv_processor_node src/capture_node.cpp ${SOURCES})
+# Each executable gets exactly one source file containing main(). Do not glob src/*.cpp
+# into these targets: every file in src/ defines its own main(), so a glob links them all
+# into every executable ("multiple definition of `main'").
+add_executable(dv_processor_node src/capture_node.cpp)
 # target_compile_features(dv_processor_node PRIVATE cxx_std_17)
 ament_target_dependencies(dv_processor_node
   rclcpp
@@ -62,15 +63,10 @@ ament_target_dependencies(dv_processor_node
   # libusb
 )
 
-add_executable(playback_node src/playback_node.cpp ${SOURCES})
+add_executable(playback_node src/playback_node.cpp)
 ament_target_dependencies(playback_node
   rclcpp
-  std_msgs
   sensor_msgs
-  geometry_msgs
-  tf2_msgs
-  # dv-processing
-  # libusb
 )
 
 install(TARGETS
@@ -92,7 +88,7 @@ target_link_libraries(playback_node "${cpp_typesupport_target}")
 
 # target_include_directories(dv_processor_node ${LIBUSB_INCLUDE_DIR})
 target_link_libraries(dv_processor_node Eigen3::Eigen ${LIBUSB_LIBRARY} dv::processing)
-target_link_libraries(playback_node Eigen3::Eigen ${LIBUSB_LIBRARY} dv::processing)
+target_link_libraries(playback_node Eigen3::Eigen dv::processing)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

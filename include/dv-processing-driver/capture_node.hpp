@@ -122,12 +122,12 @@ class CaptureNode : public rclcpp::Node {
          * Transform the IMU frame to the camera frame.
          * @param imu IMU message
          * @return Transformed IMU message
-         */ 
+         */
         sensor_msgs::msg::Imu transformImuFrame(sensor_msgs::msg::Imu &&imu);
 
         /** Handles the callback logic for publishing event data */
         void eventCallback();
-        
+
         /** Handles the callback logic for publishing external event data */
         void externalEventsCallback(dv_processing_driver::msg::EventArray::SharedPtr events);
 
@@ -149,7 +149,7 @@ class CaptureNode : public rclcpp::Node {
          */
         [[nodiscard]] inline builtin_interfaces::msg::Time toRosTime(const int64_t timestamp) {
             builtin_interfaces::msg::Time ts;
-            ts.sec = static_cast<uint32_t>(timestamp / 1'000'000); 
+            ts.sec = static_cast<uint32_t>(timestamp / 1'000'000);
             ts.nanosec = static_cast<uint32_t>((timestamp % 1'000'000) * 1'000);
             return ts;
         }
@@ -219,7 +219,7 @@ class CaptureNode : public rclcpp::Node {
                     seconds   = event.ts.sec;
                     timestamp = static_cast<int64_t>(seconds) * 1'000'000;
                 }
-                const int64_t eventTimestamp = timestamp + static_cast<int64_t>(event.ts.sec / 1000);
+                const int64_t eventTimestamp = timestamp + static_cast<int64_t>(event.ts.nanosec / 1000);
 
                 if (eventTimestamp != toDvTime(event.ts)) {
                     throw dv::exceptions::RuntimeError("Timestamp conversion failed!");
