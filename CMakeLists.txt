@@ -43,17 +43,17 @@ include_directories(${OpenCV_INCLUDE_DIRS} "${PROJECT_SOURCE_DIR}/include/**")
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Event.msg"
   "msg/EventArray.msg"
-  DEPENDENCIES 
+  DEPENDENCIES
   "builtin_interfaces"
   "std_msgs"
 )
 
 file(GLOB SOURCES "${PROJECT_SOURCE_DIR}/src/*.cpp")
 
-add_executable(dv_processor_node src/main.cpp ${SOURCES})
+add_executable(dv_processor_node src/capture_node.cpp ${SOURCES})
 # target_compile_features(dv_processor_node PRIVATE cxx_std_17)
-ament_target_dependencies(dv_processor_node 
-  rclcpp 
+ament_target_dependencies(dv_processor_node
+  rclcpp
   std_msgs
   sensor_msgs
   geometry_msgs
@@ -62,9 +62,20 @@ ament_target_dependencies(dv_processor_node
   # libusb
 )
 
+add_executable(playback_node src/playback_node.cpp ${SOURCES})
+ament_target_dependencies(playback_node
+  rclcpp
+  std_msgs
+  sensor_msgs
+  geometry_msgs
+  tf2_msgs
+  # dv-processing
+  # libusb
+)
 
 install(TARGETS
     dv_processor_node
+    playback_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -77,9 +88,11 @@ rosidl_get_typesupport_target(cpp_typesupport_target
   ${PROJECT_NAME} rosidl_typesupport_cpp)
 
 target_link_libraries(dv_processor_node "${cpp_typesupport_target}")
+target_link_libraries(playback_node "${cpp_typesupport_target}")
 
 # target_include_directories(dv_processor_node ${LIBUSB_INCLUDE_DIR})
 target_link_libraries(dv_processor_node Eigen3::Eigen ${LIBUSB_LIBRARY} dv::processing)
+target_link_libraries(playback_node Eigen3::Eigen ${LIBUSB_LIBRARY} dv::processing)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

@@ -49,6 +49,9 @@ class CaptureNode : public rclcpp::Node {
         // declare the camera device
         dv::io::camera::CameraPtr mCamera = dv::io::camera::open();
 
+        // External camera topic listener
+        rclcpp::Subscription<dv_processing_driver::msg::EventArray>::SharedPtr mEventSub;
+
         // publisher declaration
         rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr mCamInfoPub;
         rclcpp::Publisher<dv_processing_driver::msg::EventArray>::SharedPtr mEventPub;
@@ -115,10 +118,18 @@ class CaptureNode : public rclcpp::Node {
          */
         fs::path getCameraCalibrationDirectory(bool createDirectories = true) const;
 
+        /**
+         * Transform the IMU frame to the camera frame.
+         * @param imu IMU message
+         * @return Transformed IMU message
+         */ 
         sensor_msgs::msg::Imu transformImuFrame(sensor_msgs::msg::Imu &&imu);
 
         /** Handles the callback logic for publishing event data */
         void eventCallback();
+        
+        /** Handles the callback logic for publishing external event data */
+        void externalEventsCallback(dv_processing_driver::msg::EventArray::SharedPtr events);
 
         /** Handles the callback logic for publishing frame data */
         void frameCallback();
@@ -152,6 +163,12 @@ class CaptureNode : public rclcpp::Node {
             return (static_cast<int64_t>(timestamp.sec) * 1'000'000) + (timestamp.nanosec / 1'000);
         }
 
+        /**
+         * Convert an event store into a ROS event array message.
+         * @param events DV event store
+         * @param resolution Camera resolution
+         * @return ROS event array message
+         */
         dv_processing_driver::msg::EventArray toRosEventsMessage(const dv::EventStore &events, const cv::Size &resolution) {
         dv_processing_driver::msg::EventArray msg;
         builtin_interfaces::msg::Time time = toRosTime(events.getLowestTime());
@@ -181,17 +198,47 @@ class CaptureNode : public rclcpp::Node {
         msg.width  = resolution.width;
         msg.height = resolution.height;
         return msg;
-    }
+        }
 
-    /**
-     * Convert OpenCV image into ROS image message. Supports only single channel 8-bit, three channel 8-bit BGR images,
-     * and continuous and non-continuous memory.
-     * Performs deep data copy.
-     * @param image OpenCV Image
-     * @return ROS image (sensor_msgs::Image)
-     * @throws RuntimeError If image data layout is not supported
-     */
-    [[nodiscard]] inline sensor_msgs::msg::Image toRosImageMessage(const cv::Mat &image) {
+        /**
+         * Convert an array message into an event store.
+         * @param message Event array message
+         * @return DV Event store
+         */
+        [[nodiscard]] inline dv::EventStore toEventStore(
+            const dv_processing_driver::msg::EventArray &message) {
+            if (message.events.empty()) {
+                return {};
+            }
+            uint32_t seconds  = message.events.front().ts.sec;
+            int64_t timestamp = static_cast<int64_t>(seconds) * 1'000'000;
+            dv::EventStore store;
+            // store.setShardCapacity(message.events.size());
+            for (const auto &event : message.events) {
+                if (event.ts.sec != seconds) {
+                    seconds   = event.ts.sec;
+                    timestamp = static_cast<int64_t>(seconds) * 1'000'000;
+                }
+                const int64_t eventTimestamp = timestamp + static_cast<int64_t>(event.ts.sec / 1000);
+
+                if (eventTimestamp != toDvTime(event.ts)) {
+                    throw dv::exceptions::RuntimeError("Timestamp conversion failed!");
+                }
+
+                store.emplace_back(eventTimestamp, event.x, event.y, event.polarity);
+            }
+            return store;
+        }
+
+        /**
+         * Convert OpenCV image into ROS image message. Supports only single channel 8-bit, three channel 8-bit BGR images,
+         * and continuous and non-continuous memory.
+         * Performs deep data copy.
+         * @param image OpenCV Image
+         * @return ROS image (sensor_msgs::Image)
+         * @throws RuntimeError If image data layout is not supported
+         */
+        [[nodiscard]] inline sensor_msgs::msg::Image toRosImageMessage(const cv::Mat &image) {
         sensor_msgs::msg::Image msg;
 
         msg.height = image.rows;

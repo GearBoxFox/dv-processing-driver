@@ -1,9 +1,12 @@
 #include "../include/dv-processing-driver/capture_node.hpp"
 
-#include<filesystem>
+#include <memory>
+#include <filesystem>
 #include <opencv4/opencv2/core/types.hpp>
 #include <iostream>
 #include <chrono>
+
+using std::placeholders::_1;
 
 namespace dv_capture_node {
     CaptureNode::CaptureNode() : Node("dv_capture_node") {
@@ -13,6 +16,8 @@ namespace dv_capture_node {
         mEventPub = this->create_publisher<dv_processing_driver::msg::EventArray>("events", 10);
         mImuPub = this->create_publisher<sensor_msgs::msg::Imu>("imu", 10);
         mAccumFramePub = this->create_publisher<sensor_msgs::msg::Image>("img_accum", 10);
+
+        mEventSub = this->create_subscription<dv_processing_driver::msg::EventArray>("ext_events", 10, std::bind(&CaptureNode::externalEventsCallback, this, _1));
 
         // create the accumulator for the frames
         mAccumulator = dv::Accumulator(mCamera->getEventResolution().value());
@@ -253,7 +258,7 @@ namespace dv_capture_node {
             imuCalibration.name = cameraName;
         }
         bool imuHasValues = false;
-        if ((!mImuToCamTransforms.transforms.empty())) {
+        if (!mImuToCamTransforms.transforms.empty()) {
             const Eigen::Matrix4f mat         = mImuToCamTransform.getTransform().transpose();
             imuCalibration.transformationToC0 = dv::kinematics::Transformationf{0, mat};
             imuHasValues                      = true;
@@ -291,9 +296,11 @@ namespace dv_capture_node {
         // RCLCPP_INFO_STREAM(this->get_logger(), "Starting to publish events.");
 
         if (!mEvents.has_value()) {
-                mEvents = mCamera->getNextEventBatch();
+                if (!this->get_parameter("use_external_events").as_bool()) {
+                    mEvents = mCamera->getNextEventBatch();
+                }
                 // RCLCPP_INFO_STREAM(this->get_logger(), "No events! Getting next batch");
-            }
+        }
         while (mEvents.has_value() && !mEvents->isEmpty()) {
             dv::EventStore store;
             // todo add filtering
@@ -305,10 +312,12 @@ namespace dv_capture_node {
             }
 
             if (this->get_parameter("accumulate_frames").as_bool()) {
-                mAccumulator.accumulate(store);
-            }
+                    mAccumulator.accumulate(store);
+                }
 
-            mEvents = mCamera->getNextEventBatch();
+            if (this->get_parameter("use_external_events").as_bool()) {
+                mEvents = mCamera->getNextEventBatch();
+            }
         }
 
         if (mEvents.has_value() && mEvents->isEmpty()) {
@@ -316,6 +325,13 @@ namespace dv_capture_node {
         }
 
         // RCLCPP_INFO_STREAM(this->get_logger(), "Finished publishing " << i << " events!");
+    }
+
+    // gets the external events from the topic as a parameter and accumulates them into the accumulator
+    void CaptureNode::externalEventsCallback(dv_processing_driver::msg::EventArray::SharedPtr events) {
+        if (events) {
+            mEvents = this->toEventStore(*events);
+        }
     }
 
     void CaptureNode::frameCallback() {
@@ -378,7 +394,7 @@ namespace dv_capture_node {
             imu.linear_acceleration.z = resV.z();
         }
         return imu;
-    } 
+    }
 
 
 
@@ -389,6 +405,7 @@ namespace dv_capture_node {
         this->declare_parameter("accumulate_frames", true);
         this->declare_parameter("imu_frame_name", "imu_link");
         this->declare_parameter("camera_frame_name", "camera_link");
+        this->declare_parameter("use_external_events", false);
 
         // Imu parameters
         this->declare_parameter("transformImuToCameraFrame", false);
@@ -400,6 +417,12 @@ namespace dv_capture_node {
         this->declare_parameter("accumulator_decay_function", "EXPONENTIAL");
     }
 
-    
 } // namespace dv_capture_node
 
+int main(int argc, char * argv[])
+{
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared<dv_capture_node::CaptureNode>());
+  rclcpp::shutdown();
+  return 0;
+}
