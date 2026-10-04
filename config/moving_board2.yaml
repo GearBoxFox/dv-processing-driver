@@ -1,0 +1,9 @@
+playback_node:
+  ros__parameters:
+    accumulator_decay_function: LINEAR
+    accumulator_decay_param: 1.67e-7      # 0.5 / 3 s
+    accumulator_event_contribution: 0.2
+    accumulator_neutral_potential: 0.5
+    accumulator_min_potential: 0.0
+    accumulator_max_potential: 1.0
+    accumulator_synchronous_decay: true

@@ -70,7 +70,7 @@ public:
         declare_parameter<double>("accumulator_min_potential", 0.0);
         declare_parameter<double>("accumulator_neutral_potential", 0.0);
         declare_parameter<double>("accumulator_max_potential", 1.0);
-        declare_parameter<bool>("accumulator_rectify_polarity", false);
+        declare_parameter<bool>("accumulator_ignore_polarity", false);
         declare_parameter<bool>("accumulator_synchronous_decay", false);
 
         mFramePub = create_publisher<sensor_msgs::msg::Image>(outputTopic, 10);
@@ -97,7 +97,7 @@ private:
         float minPotential                   = 0.0f;
         float neutralPotential               = 0.0f;
         float maxPotential                   = 1.0f;
-        bool rectifyPolarity                 = false;
+        bool ignorePolarity                  = false;
         bool synchronousDecay                = false;
     };
 
@@ -127,7 +127,7 @@ private:
         "accumulator_min_potential",
         "accumulator_neutral_potential",
         "accumulator_max_potential",
-        "accumulator_rectify_polarity",
+        "accumulator_ignore_polarity",
         "accumulator_synchronous_decay",
     };
 
@@ -187,7 +187,7 @@ private:
                 next.accumulator.neutralPotential = static_cast<float>(param.as_double());
             else if (name == "accumulator_max_potential")
                 next.accumulator.maxPotential = static_cast<float>(param.as_double());
-            else if (name == "accumulator_rectify_polarity") next.accumulator.rectifyPolarity = param.as_bool();
+            else if (name == "accumulator_ignore_polarity") next.accumulator.ignorePolarity  = param.as_bool();
             else if (name == "accumulator_synchronous_decay") next.accumulator.synchronousDecay = param.as_bool();
         }
 
@@ -313,7 +313,7 @@ private:
         accumulator.setMinPotential(s.minPotential);
         accumulator.setNeutralPotential(s.neutralPotential);
         accumulator.setMaxPotential(s.maxPotential);
-        // accumulator.setRectifyPolarity(s.rectifyPolarity);
+        accumulator.setIgnorePolarity(s.ignorePolarity);
         accumulator.setSynchronousDecay(s.synchronousDecay);
     }
 
