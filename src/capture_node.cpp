@@ -296,9 +296,7 @@ namespace dv_capture_node {
         // RCLCPP_INFO_STREAM(this->get_logger(), "Starting to publish events.");
 
         if (!mEvents.has_value()) {
-                if (!this->get_parameter("use_external_events").as_bool()) {
-                    mEvents = mCamera->getNextEventBatch();
-                }
+                mEvents = mCamera->getNextEventBatch();
                 // RCLCPP_INFO_STREAM(this->get_logger(), "No events! Getting next batch");
         }
         while (mEvents.has_value() && !mEvents->isEmpty()) {
@@ -315,9 +313,7 @@ namespace dv_capture_node {
                     mAccumulator.accumulate(store);
                 }
 
-            if (this->get_parameter("use_external_events").as_bool()) {
-                mEvents = mCamera->getNextEventBatch();
-            }
+            mEvents = mCamera->getNextEventBatch();
         }
 
         if (mEvents.has_value() && mEvents->isEmpty()) {
